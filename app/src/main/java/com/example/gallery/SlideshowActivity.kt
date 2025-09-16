@@ -44,13 +44,15 @@ class SlideshowActivity : ComponentActivity() {
 
         val imageUriStrings = intent.getStringArrayListExtra("image_uris") ?: arrayListOf()
         val imageUris = imageUriStrings.map { Uri.parse(it) }
+        val defaultSpeed = intent.getIntExtra("default_speed", SettingsManager.DEFAULT_SLIDESHOW_SPEED)
 
         setContent {
             GalleryTheme {
                 SlideshowScreen(
                     imageUris = imageUris,
+                    defaultSpeed = defaultSpeed,
                     onClose = { finish() },
-                    onFinished = { finish() } // 添加完成回调
+                    onFinished = { finish() }
                 )
             }
         }
@@ -60,13 +62,14 @@ class SlideshowActivity : ComponentActivity() {
 @Composable
 fun SlideshowScreen(
     imageUris: List<Uri>,
+    defaultSpeed: Int,
     onClose: () -> Unit,
     onFinished: () -> Unit
 ) {
     var currentIndex by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(true) }
     var isControlsVisible by remember { mutableStateOf(true) }
-    var slideDuration by remember { mutableIntStateOf(3) } // 秒
+    var slideDuration by remember { mutableIntStateOf(defaultSpeed) }
     var transitionEffect by remember { mutableStateOf(TransitionEffect.FADE) }
     var showSettings by remember { mutableStateOf(false) }
 

@@ -49,6 +49,12 @@
             android:configChanges="orientation|keyboardHidden|screenSize"
             android:exported="false" />
 
+        <!-- 设置Activity -->
+        <activity
+            android:name=".SettingsActivity"
+            android:theme="@style/Theme.Gallery.NoActionBar"
+            android:exported="false" />
+
     </application>
 
 </manifest>

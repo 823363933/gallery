@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
     private var currentPath by mutableStateOf<String>("")
     private var mediaFiles by mutableStateOf<List<MediaFile>>(emptyList())
     private var navigationStack by mutableStateOf<List<NavigationItem>>(emptyList())
+    private lateinit var settingsManager: SettingsManager
 
     private val folderPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -62,13 +63,26 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.all { it.value }) {
-            // 权限已授予
+            // 权限已授予，尝试加载默认文件夹
+            loadDefaultFolderIfExists()
+        }
+    }
+
+    // 添加设置Activity结果监听器
+    private val settingsLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        android.util.Log.d("MainActivity", "从设置页面返回，结果码: ${result.resultCode}")
+        // 从设置页面返回后，重新检查默认文件夹
+        if (selectedFolderUri == null) {
+            loadDefaultFolderIfExists()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        settingsManager = SettingsManager(this)
         requestPermissions()
 
         setContent {
@@ -90,6 +104,12 @@ class MainActivity : ComponentActivity() {
                     },
                     onStartSlideshow = {
                         startSlideshow()
+                    },
+                    onOpenSettings = {
+                        openSettings()
+                    },
+                    onDeleteFile = { mediaFile ->
+                        deleteMediaFile(mediaFile)
                     }
                 )
             }
@@ -108,6 +128,30 @@ class MainActivity : ComponentActivity() {
 
         if (notGranted.isNotEmpty()) {
             permissionLauncher.launch(notGranted.toTypedArray())
+        } else {
+            loadDefaultFolderIfExists()
+        }
+    }
+
+    private fun loadDefaultFolderIfExists() {
+        val defaultUri = settingsManager.getDefaultFolderUri()
+        if (defaultUri != null) {
+            android.util.Log.d("MainActivity", "尝试加载默认文件夹: $defaultUri")
+
+            if (UriPermissionHelper.isUriAccessible(contentResolver, defaultUri)) {
+                selectedFolderUri = defaultUri
+                val rootName = settingsManager.getDefaultFolderName()
+                    ?: UriPermissionHelper.getFolderDisplayName(contentResolver, defaultUri)
+                navigationStack = listOf(NavigationItem(defaultUri, rootName))
+                loadMediaFiles(defaultUri)
+
+                android.util.Log.d("MainActivity", "默认文件夹加载完成: $rootName")
+            } else {
+                android.util.Log.w("MainActivity", "默认文件夹无法访问，清除设置")
+                settingsManager.clearDefaultFolder()
+            }
+        } else {
+            android.util.Log.d("MainActivity", "没有设置默认文件夹")
         }
     }
 
@@ -241,8 +285,32 @@ class MainActivity : ComponentActivity() {
         if (imageFiles.isNotEmpty()) {
             val intent = Intent(this, SlideshowActivity::class.java).apply {
                 putStringArrayListExtra("image_uris", ArrayList(imageFiles.map { it.uri.toString() }))
+                putExtra("default_speed", settingsManager.getDefaultSlideshowSpeed())
             }
             startActivity(intent)
+        }
+    }
+
+    private fun openSettings() {
+        val intent = Intent(this, SettingsActivity::class.java)
+        settingsLauncher.launch(intent)
+    }
+
+    private fun deleteMediaFile(mediaFile: MediaFile) {
+        try {
+            val deleted = DocumentsContract.deleteDocument(contentResolver, mediaFile.uri)
+            if (deleted) {
+                // 重新加载当前文件夹
+                val currentFolder = navigationStack.lastOrNull()?.uri
+                if (currentFolder != null) {
+                    loadMediaFiles(currentFolder)
+                }
+                Log.d("MainActivity", "删除文件成功: ${mediaFile.name}")
+            } else {
+                Log.w("MainActivity", "删除文件失败: ${mediaFile.name}")
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "删除文件时出错: ${mediaFile.name}", e)
         }
     }
 }
@@ -258,7 +326,9 @@ fun GalleryApp(
     onNavigateToFolder: (MediaFile) -> Unit,
     onNavigateBack: () -> Unit,
     onOpenMedia: (MediaFile) -> Unit,
-    onStartSlideshow: () -> Unit
+    onStartSlideshow: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onDeleteFile: (MediaFile) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -290,6 +360,9 @@ fun GalleryApp(
                 IconButton(onClick = onSelectFolder) {
                     Icon(Icons.Default.FolderOpen, contentDescription = "选择文件夹")
                 }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Default.Settings, contentDescription = "设置")
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -304,7 +377,8 @@ fun GalleryApp(
             MediaFilesList(
                 mediaFiles = mediaFiles,
                 onNavigateToFolder = onNavigateToFolder,
-                onOpenMedia = onOpenMedia
+                onOpenMedia = onOpenMedia,
+                onDeleteFile = onDeleteFile
             )
         }
     }
@@ -363,7 +437,8 @@ fun WelcomeScreen(onSelectFolder: () -> Unit) {
 fun MediaFilesList(
     mediaFiles: List<MediaFile>,
     onNavigateToFolder: (MediaFile) -> Unit,
-    onOpenMedia: (MediaFile) -> Unit
+    onOpenMedia: (MediaFile) -> Unit,
+    onDeleteFile: (MediaFile) -> Unit
 ) {
     if (mediaFiles.isEmpty()) {
         // 显示空状态
@@ -402,7 +477,8 @@ fun MediaFilesList(
                             MediaType.FOLDER -> onNavigateToFolder(mediaFile)
                             MediaType.IMAGE, MediaType.VIDEO -> onOpenMedia(mediaFile)
                         }
-                    }
+                    },
+                    onDelete = { onDeleteFile(mediaFile) }
                 )
             }
         }
@@ -412,8 +488,11 @@ fun MediaFilesList(
 @Composable
 fun MediaFileItem(
     mediaFile: MediaFile,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -480,6 +559,17 @@ fun MediaFileItem(
                 modifier = Modifier.weight(1f)
             )
 
+            // 删除按钮（对于文件和文件夹）
+            IconButton(
+                onClick = { showDeleteDialog = true }
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "删除",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+
             // 文件类型指示器
             if (mediaFile.type == MediaType.FOLDER) {
                 Icon(
@@ -489,6 +579,39 @@ fun MediaFileItem(
                 )
             }
         }
+    }
+
+    // 删除确认对话框
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("确认删除") },
+            text = {
+                Text(
+                    when (mediaFile.type) {
+                        MediaType.FOLDER -> "确定要删除文件夹 \"${mediaFile.name}\" 吗？这将删除其中的所有内容。"
+                        else -> "确定要删除文件 \"${mediaFile.name}\" 吗？"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete()
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteDialog = false }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 
