@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.util.Log
@@ -61,11 +62,9 @@ class MainActivity : ComponentActivity() {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        if (permissions.all { it.value }) {
-            // 权限已授予，尝试加载默认文件夹
-            loadDefaultFolderIfExists()
-        }
+    ) { _ ->
+        // 即便权限未授予，已有的 SAF 持久化权限依然可用，直接尝试加载
+        loadDefaultFolderIfExists()
     }
 
     // 添加设置Activity结果监听器
@@ -117,18 +116,23 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestPermissions() {
-        val permissions = arrayOf(
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permissions = arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO
+            )
 
-        val notGranted = permissions.filter { permission ->
-            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
-        }
+            val notGranted = permissions.filter { permission ->
+                ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+            }
 
-        if (notGranted.isNotEmpty()) {
-            permissionLauncher.launch(notGranted.toTypedArray())
+            if (notGranted.isNotEmpty()) {
+                permissionLauncher.launch(notGranted.toTypedArray())
+            } else {
+                loadDefaultFolderIfExists()
+            }
         } else {
+            // 对旧系统直接依赖 SAF 的持久化 URI 权限
             loadDefaultFolderIfExists()
         }
     }
