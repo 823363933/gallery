@@ -72,10 +72,8 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         android.util.Log.d("MainActivity", "从设置页面返回，结果码: ${result.resultCode}")
-        // 从设置页面返回后，重新检查默认文件夹
-        if (selectedFolderUri == null) {
-            loadDefaultFolderIfExists()
-        }
+        // 从设置页面返回后，始终刷新默认文件夹
+        loadDefaultFolderIfExists()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

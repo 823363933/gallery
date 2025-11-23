@@ -14,6 +14,7 @@ class SettingsManager(context: Context) {
         private const val KEY_DEFAULT_FOLDER_URI = "default_folder_uri"
         private const val KEY_DEFAULT_FOLDER_NAME = "default_folder_name"
         private const val KEY_DEFAULT_SLIDESHOW_SPEED = "default_slideshow_speed"
+        private const val KEY_VIDEO_POSITION_PREFIX = "video_position_"
 
         // 默认播放速度（秒）
         const val DEFAULT_SLIDESHOW_SPEED = 3
@@ -108,5 +109,27 @@ class SettingsManager(context: Context) {
         val hasFolder = getDefaultFolderUri() != null
         Log.d(TAG, "检查是否有默认文件夹: $hasFolder")
         return hasFolder
+    }
+
+    fun saveVideoPlaybackPosition(uri: Uri, positionMs: Long) {
+        try {
+            sharedPreferences.edit()
+                .putLong(KEY_VIDEO_POSITION_PREFIX + uri.toString(), positionMs)
+                .apply()
+            Log.d(TAG, "保存视频进度: $uri -> $positionMs")
+        } catch (e: Exception) {
+            Log.e(TAG, "保存视频进度失败: $uri", e)
+        }
+    }
+
+    fun getVideoPlaybackPosition(uri: Uri): Long {
+        return try {
+            val pos = sharedPreferences.getLong(KEY_VIDEO_POSITION_PREFIX + uri.toString(), 0L)
+            Log.d(TAG, "读取视频进度: $uri -> $pos")
+            pos
+        } catch (e: Exception) {
+            Log.e(TAG, "读取视频进度失败: $uri", e)
+            0L
+        }
     }
 }

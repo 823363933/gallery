@@ -2,12 +2,12 @@ package com.example.gallery
 
 import android.net.Uri
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -20,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +29,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.gallery.ui.theme.GalleryTheme
+import com.google.android.exoplayer2.PlaybackParameters
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.ui.PlayerView
@@ -37,7 +37,7 @@ import kotlinx.coroutines.launch
 
 class MediaViewerActivity : ComponentActivity() {
 
-    private var exoPlayer: ExoPlayer? = null
+    private lateinit var settingsManager: SettingsManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,6 +57,7 @@ class MediaViewerActivity : ComponentActivity() {
 
         val mediaUri = Uri.parse(mediaUriString)
         val type = MediaType.valueOf(mediaType)
+        settingsManager = SettingsManager(this)
 
         setContent {
             GalleryTheme {
@@ -74,17 +75,12 @@ class MediaViewerActivity : ComponentActivity() {
                         mediaUri = mediaUri,
                         mediaType = type,
                         mediaName = mediaName,
+                        settingsManager = settingsManager,
                         onClose = { finish() }
                     )
                 }
             }
         }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        exoPlayer?.release()
-        exoPlayer = null
     }
 }
 
@@ -257,6 +253,7 @@ fun MediaViewerScreen(
     mediaUri: Uri,
     mediaType: MediaType,
     mediaName: String,
+    settingsManager: SettingsManager,
     onClose: () -> Unit
 ) {
     var isControlsVisible by remember { mutableStateOf(true) }
@@ -283,7 +280,8 @@ fun MediaViewerScreen(
             }
             MediaType.VIDEO -> {
                 VideoPlayer(
-                    videoUri = mediaUri
+                    videoUri = mediaUri,
+                    settingsManager = settingsManager
                 )
             }
             else -> {
@@ -352,31 +350,113 @@ fun SimpleImage(
 
 @Composable
 fun VideoPlayer(
-    videoUri: Uri
+    videoUri: Uri,
+    settingsManager: SettingsManager
 ) {
     val context = LocalContext.current
+    val initialPosition = remember { settingsManager.getVideoPlaybackPosition(videoUri) }
+    var baseSpeed by remember { mutableStateOf(1f) }
+    var isBoosted by remember { mutableStateOf(false) }
+    val effectiveSpeed = if (isBoosted) baseSpeed * 2f else baseSpeed
+    var showSpeedMenu by remember { mutableStateOf(false) }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             val mediaItem = MediaItem.fromUri(videoUri)
             setMediaItem(mediaItem)
+            if (initialPosition > 0) {
+                seekTo(initialPosition)
+            }
             prepare()
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            settingsManager.saveVideoPlaybackPosition(videoUri, exoPlayer.currentPosition)
             exoPlayer.release()
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = true
-            }
-        },
+    LaunchedEffect(effectiveSpeed) {
+        exoPlayer.playbackParameters = PlaybackParameters(effectiveSpeed)
+    }
+
+    Box(
         modifier = Modifier.fillMaxSize()
-    )
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+
+                    setOnLongClickListener {
+                        isBoosted = true
+                        false // 让 PlayerView 继续处理长按（如需要）
+                    }
+                    setOnTouchListener { _, event ->
+                        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                            isBoosted = false
+                        }
+                        false // 不拦截点击，交给控件
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.End
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.6f))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clickable { showSpeedMenu = true }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Speed,
+                        contentDescription = "播放速度",
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = String.format("%.1fx", effectiveSpeed),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Icon(
+                        Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = Color.White
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = showSpeedMenu,
+                onDismissRequest = { showSpeedMenu = false }
+            ) {
+                listOf(1f, 1.5f, 2f, 3f).forEach { speed ->
+                    DropdownMenuItem(
+                        text = { Text("${speed}x") },
+                        onClick = {
+                            baseSpeed = speed
+                            isBoosted = false
+                            showSpeedMenu = false
+                        }
+                    )
+                }
+            }
+        }
+    }
 }

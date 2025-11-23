@@ -23,23 +23,37 @@ import com.example.gallery.ui.theme.GalleryTheme
 class SettingsActivity : ComponentActivity() {
 
     private lateinit var settingsManager: SettingsManager
+    private var currentDefaultUri: Uri? = null
 
     private val folderPickerLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         uri?.let {
             try {
+                val previousUri = currentDefaultUri
+
                 // 先获取持久化权限
                 contentResolver.takePersistableUriPermission(
                     it,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
 
-                // 获取文件夹名称
+                // 获取文件夹名称（处理部分ROM对树URI query的限制）
                 val rootName = UriPermissionHelper.getFolderDisplayName(contentResolver, it)
+
+                // 如果与之前的默认文件夹不同，释放旧权限，避免系统自动回填旧目录
+                if (previousUri != null && previousUri != it) {
+                    runCatching {
+                        contentResolver.releasePersistableUriPermission(
+                            previousUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        )
+                    }
+                }
 
                 // 保存到设置
                 settingsManager.saveDefaultFolder(it, rootName)
+                currentDefaultUri = it
 
                 android.util.Log.d("SettingsActivity", "默认文件夹设置完成，准备返回")
 
@@ -56,17 +70,28 @@ class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        settingsManager = SettingsManager(this)
+            settingsManager = SettingsManager(this)
+            currentDefaultUri = settingsManager.getDefaultFolderUri()
 
-        setContent {
-            GalleryTheme {
+            setContent {
+                GalleryTheme {
                 SettingsScreen(
                     settingsManager = settingsManager,
-                    onSelectDefaultFolder = { folderPickerLauncher.launch(null) },
+                    onSelectDefaultFolder = { launchFolderPicker() },
                     onBack = { finish() }
                 )
             }
         }
+    }
+
+    private fun launchFolderPicker() {
+        val initialUri = try {
+            // 强制从根目录开始，避免系统直接复用旧的目录选择
+            DocumentsContract.buildRootUri("com.android.externalstorage.documents", "primary")
+        } catch (e: Exception) {
+            null
+        }
+        folderPickerLauncher.launch(initialUri)
     }
 }
 

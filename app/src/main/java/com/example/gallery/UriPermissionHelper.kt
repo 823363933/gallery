@@ -51,7 +51,13 @@ object UriPermissionHelper {
      */
     fun getFolderDisplayName(contentResolver: ContentResolver, uri: Uri): String {
         return try {
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            // 对树URI需要先构建对应的document URI再查询，否则部分ROM会抛出UnsupportedOperationException
+            val queryUri = if (DocumentsContract.isTreeUri(uri)) {
+                val treeId = DocumentsContract.getTreeDocumentId(uri)
+                DocumentsContract.buildDocumentUriUsingTree(uri, treeId)
+            } else uri
+
+            contentResolver.query(queryUri, null, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                     if (nameIndex >= 0) {
@@ -61,7 +67,8 @@ object UriPermissionHelper {
             } ?: "根目录"
         } catch (e: Exception) {
             Log.e(TAG, "获取文件夹名称失败", e)
-            "根目录"
+            // 兜底返回 URI 的最后一段，避免阻塞调用方
+            uri.lastPathSegment ?: "根目录"
         }
     }
 }
