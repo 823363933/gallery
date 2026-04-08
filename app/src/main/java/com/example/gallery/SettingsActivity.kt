@@ -7,12 +7,42 @@ import android.provider.DocumentsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoDelete
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -32,16 +62,13 @@ class SettingsActivity : ComponentActivity() {
             try {
                 val previousUri = currentDefaultUri
 
-                // 先获取持久化权限
                 contentResolver.takePersistableUriPermission(
                     it,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
 
-                // 获取文件夹名称（处理部分ROM对树URI query的限制）
                 val rootName = UriPermissionHelper.getFolderDisplayName(contentResolver, it)
 
-                // 如果与之前的默认文件夹不同，释放旧权限，避免系统自动回填旧目录
                 if (previousUri != null && previousUri != it) {
                     runCatching {
                         contentResolver.releasePersistableUriPermission(
@@ -51,18 +78,11 @@ class SettingsActivity : ComponentActivity() {
                     }
                 }
 
-                // 保存到设置
                 settingsManager.saveDefaultFolder(it, rootName)
                 currentDefaultUri = it
-
-                android.util.Log.d("SettingsActivity", "默认文件夹设置完成，准备返回")
-
-                // 设置结果并返回，让MainActivity知道需要刷新
                 setResult(RESULT_OK)
                 finish()
-
-            } catch (e: Exception) {
-                android.util.Log.e("SettingsActivity", "设置默认文件夹失败", e)
+            } catch (_: Exception) {
             }
         }
     }
@@ -70,11 +90,11 @@ class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-            settingsManager = SettingsManager(this)
-            currentDefaultUri = settingsManager.getDefaultFolderUri()
+        settingsManager = SettingsManager(this)
+        currentDefaultUri = settingsManager.getDefaultFolderUri()
 
-            setContent {
-                GalleryTheme {
+        setContent {
+            GalleryTheme {
                 SettingsScreen(
                     settingsManager = settingsManager,
                     onSelectDefaultFolder = { launchFolderPicker() },
@@ -86,9 +106,8 @@ class SettingsActivity : ComponentActivity() {
 
     private fun launchFolderPicker() {
         val initialUri = try {
-            // 强制从根目录开始，避免系统直接复用旧的目录选择
             DocumentsContract.buildRootUri("com.android.externalstorage.documents", "primary")
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
         folderPickerLauncher.launch(initialUri)
@@ -102,21 +121,18 @@ fun SettingsScreen(
     onSelectDefaultFolder: () -> Unit,
     onBack: () -> Unit
 ) {
-    // 使用remember和mutableStateOf来响应式更新UI
     var defaultFolderName by remember { mutableStateOf(settingsManager.getDefaultFolderName()) }
-    var defaultSlideshowSpeed by remember { mutableStateOf(settingsManager.getDefaultSlideshowSpeed()) }
+    var defaultSlideshowSpeed by remember { mutableIntStateOf(settingsManager.getDefaultSlideshowSpeed()) }
+    var instantDeleteEnabled by remember { mutableStateOf(settingsManager.isInstantDeleteEnabled()) }
     var showSpeedDialog by remember { mutableStateOf(false) }
 
-    // 使用LaunchedEffect来监听设置变化
     LaunchedEffect(Unit) {
         defaultFolderName = settingsManager.getDefaultFolderName()
         defaultSlideshowSpeed = settingsManager.getDefaultSlideshowSpeed()
+        instantDeleteEnabled = settingsManager.isInstantDeleteEnabled()
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        // 顶部工具栏
+    Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("设置") },
             navigationIcon = {
@@ -129,21 +145,17 @@ fun SettingsScreen(
             )
         )
 
-        // 设置内容
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 默认文件夹设置
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "默认文件夹",
                         fontSize = 18.sp,
@@ -154,7 +166,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "设置应用启动时自动加载的文件夹",
+                        text = "设置应用启动时自动加载的文件夹。",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -169,12 +181,12 @@ fun SettingsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "当前默认文件夹:",
+                                    text = "当前默认文件夹",
                                     fontSize = 14.sp,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                 )
                                 Text(
-                                    text = defaultFolderName!!,
+                                    text = defaultFolderName.orEmpty(),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -205,14 +217,63 @@ fun SettingsScreen(
                 }
             }
 
-            // 幻灯片设置
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "即时删除",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.AutoDelete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "关闭查看器时自动删除",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "开启后，图片关闭查看器即删除；视频播放到结尾后再关闭播放器时删除。",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+
+                        Switch(
+                            checked = instantDeleteEnabled,
+                            onCheckedChange = {
+                                instantDeleteEnabled = it
+                                settingsManager.saveInstantDeleteEnabled(it)
+                            }
+                        )
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "幻灯片播放",
                         fontSize = 18.sp,
@@ -223,7 +284,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "设置默认的播放间隔时间",
+                        text = "设置默认的播放间隔时间。",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -235,22 +296,28 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "默认播放间隔",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Medium
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Speed,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
                             )
-                            Text(
-                                text = "${defaultSlideshowSpeed}秒",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "默认播放间隔",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "${defaultSlideshowSpeed} 秒",
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
 
-                        TextButton(
-                            onClick = { showSpeedDialog = true }
-                        ) {
+                        TextButton(onClick = { showSpeedDialog = true }) {
                             Text("修改")
                         }
                     }
@@ -259,7 +326,6 @@ fun SettingsScreen(
         }
     }
 
-    // 播放速度设置对话框
     if (showSpeedDialog) {
         var tempSpeed by remember { mutableIntStateOf(defaultSlideshowSpeed) }
 
@@ -268,7 +334,7 @@ fun SettingsScreen(
             title = { Text("设置播放间隔") },
             text = {
                 Column {
-                    Text("选择幻灯片播放间隔时间: ${tempSpeed}秒")
+                    Text("选择幻灯片播放间隔: ${tempSpeed} 秒")
                     Spacer(modifier = Modifier.height(16.dp))
                     Slider(
                         value = tempSpeed.toFloat(),
@@ -290,9 +356,7 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { showSpeedDialog = false }
-                ) {
+                TextButton(onClick = { showSpeedDialog = false }) {
                     Text("取消")
                 }
             }

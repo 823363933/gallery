@@ -1,24 +1,53 @@
 package com.example.gallery
 
+import android.app.Activity
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.NavigateBefore
+import androidx.compose.material.icons.filled.NavigateNext
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -29,10 +58,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.gallery.ui.theme.GalleryTheme
-import com.google.android.exoplayer2.PlaybackParameters
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.PlaybackParameters
+import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.ui.PlayerView
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MediaViewerActivity : ComponentActivity() {
@@ -42,7 +73,6 @@ class MediaViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 全屏显示
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -62,25 +92,65 @@ class MediaViewerActivity : ComponentActivity() {
         setContent {
             GalleryTheme {
                 if (type == MediaType.IMAGE && allImageUris.isNotEmpty()) {
-                    // 图片浏览器（支持左右滑动）
                     ImageGalleryViewer(
                         initialIndex = currentIndex,
                         imageUris = allImageUris.map { Uri.parse(it) },
                         imageNames = allImageNames,
-                        onClose = { finish() }
+                        shouldInstantDelete = settingsManager.isInstantDeleteEnabled(),
+                        onClose = { currentImageUri ->
+                            handleMediaClose(
+                                uri = currentImageUri,
+                                shouldDelete = settingsManager.isInstantDeleteEnabled()
+                            )
+                        }
                     )
                 } else {
-                    // 单个媒体查看器
                     MediaViewerScreen(
                         mediaUri = mediaUri,
                         mediaType = type,
                         mediaName = mediaName,
                         settingsManager = settingsManager,
-                        onClose = { finish() }
+                        shouldInstantDelete = settingsManager.isInstantDeleteEnabled(),
+                        onClose = { shouldDelete ->
+                            handleMediaClose(
+                                uri = mediaUri,
+                                shouldDelete = shouldDelete && settingsManager.isInstantDeleteEnabled()
+                            )
+                        }
                     )
                 }
             }
         }
+    }
+
+    private fun handleMediaClose(uri: Uri, shouldDelete: Boolean) {
+        var deleted = false
+        if (shouldDelete) {
+            deleted = deleteMediaFile(uri)
+            if (deleted) {
+                settingsManager.clearVideoPlaybackPosition(uri)
+            }
+        }
+
+        if (deleted) {
+            setResult(
+                Activity.RESULT_OK,
+                android.content.Intent().putExtra(EXTRA_MEDIA_DELETED, true)
+            )
+        }
+        finish()
+    }
+
+    private fun deleteMediaFile(uri: Uri): Boolean {
+        return try {
+            DocumentsContract.deleteDocument(contentResolver, uri)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    companion object {
+        const val EXTRA_MEDIA_DELETED = "media_deleted"
     }
 }
 
@@ -90,7 +160,8 @@ fun ImageGalleryViewer(
     initialIndex: Int,
     imageUris: List<Uri>,
     imageNames: List<String>,
-    onClose: () -> Unit
+    shouldInstantDelete: Boolean,
+    onClose: (Uri) -> Unit
 ) {
     var isControlsVisible by remember { mutableStateOf(true) }
     val pagerState = rememberPagerState(
@@ -99,10 +170,13 @@ fun ImageGalleryViewer(
     )
     val scope = rememberCoroutineScope()
 
-    // 自动隐藏控制栏
+    BackHandler {
+        onClose(imageUris[pagerState.currentPage])
+    }
+
     LaunchedEffect(isControlsVisible) {
         if (isControlsVisible) {
-            kotlinx.coroutines.delay(3000)
+            delay(3000)
             isControlsVisible = false
         }
     }
@@ -112,7 +186,6 @@ fun ImageGalleryViewer(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 图片浏览器
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
@@ -130,7 +203,6 @@ fun ImageGalleryViewer(
             )
         }
 
-        // 顶部控制栏
         androidx.compose.animation.AnimatedVisibility(
             visible = isControlsVisible,
             modifier = Modifier.align(Alignment.TopStart)
@@ -150,7 +222,7 @@ fun ImageGalleryViewer(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = { onClose(imageUris[pagerState.currentPage]) }) {
                         Icon(
                             Icons.Default.ArrowBack,
                             contentDescription = "返回",
@@ -177,7 +249,6 @@ fun ImageGalleryViewer(
             }
         }
 
-        // 底部导航控制
         androidx.compose.animation.AnimatedVisibility(
             visible = isControlsVisible && imageUris.size > 1,
             modifier = Modifier.align(Alignment.BottomStart)
@@ -244,6 +315,17 @@ fun ImageGalleryViewer(
                 }
             }
         }
+
+        if (shouldInstantDelete && isControlsVisible) {
+            Text(
+                text = "关闭查看器后将删除当前图片",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+            )
+        }
     }
 }
 
@@ -254,14 +336,19 @@ fun MediaViewerScreen(
     mediaType: MediaType,
     mediaName: String,
     settingsManager: SettingsManager,
-    onClose: () -> Unit
+    shouldInstantDelete: Boolean,
+    onClose: (Boolean) -> Unit
 ) {
     var isControlsVisible by remember { mutableStateOf(true) }
+    var canDeleteOnClose by remember { mutableStateOf(mediaType == MediaType.IMAGE) }
 
-    // 自动隐藏控制栏
+    BackHandler {
+        onClose(canDeleteOnClose)
+    }
+
     LaunchedEffect(isControlsVisible) {
         if (isControlsVisible && mediaType == MediaType.IMAGE) {
-            kotlinx.coroutines.delay(3000)
+            delay(3000)
             isControlsVisible = false
         }
     }
@@ -274,23 +361,22 @@ fun MediaViewerScreen(
     ) {
         when (mediaType) {
             MediaType.IMAGE -> {
-                SimpleImage(
-                    imageUri = mediaUri
-                )
+                SimpleImage(imageUri = mediaUri)
             }
+
             MediaType.VIDEO -> {
                 VideoPlayer(
                     videoUri = mediaUri,
-                    settingsManager = settingsManager
+                    settingsManager = settingsManager,
+                    onPlaybackCompletedChanged = { canDeleteOnClose = it }
                 )
             }
+
             else -> {
-                // 不应该到达这里
                 Text("不支持的媒体类型", color = Color.White)
             }
         }
 
-        // 顶部控制栏
         androidx.compose.animation.AnimatedVisibility(
             visible = isControlsVisible,
             modifier = Modifier.align(Alignment.TopStart)
@@ -310,7 +396,7 @@ fun MediaViewerScreen(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = { onClose(canDeleteOnClose) }) {
                         Icon(
                             Icons.Default.ArrowBack,
                             contentDescription = "返回",
@@ -330,13 +416,22 @@ fun MediaViewerScreen(
                 }
             }
         }
+
+        if (mediaType == MediaType.VIDEO && shouldInstantDelete && canDeleteOnClose) {
+            Text(
+                text = "视频已播放完，关闭播放器后将删除文件",
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+            )
+        }
     }
 }
 
 @Composable
-fun SimpleImage(
-    imageUri: Uri
-) {
+fun SimpleImage(imageUri: Uri) {
     AsyncImage(
         model = ImageRequest.Builder(LocalContext.current)
             .data(imageUri)
@@ -351,19 +446,20 @@ fun SimpleImage(
 @Composable
 fun VideoPlayer(
     videoUri: Uri,
-    settingsManager: SettingsManager
+    settingsManager: SettingsManager,
+    onPlaybackCompletedChanged: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val initialPosition = remember { settingsManager.getVideoPlaybackPosition(videoUri) }
     var baseSpeed by remember { mutableStateOf(1f) }
     var isBoosted by remember { mutableStateOf(false) }
-    val effectiveSpeed = if (isBoosted) baseSpeed * 2f else baseSpeed
     var showSpeedMenu by remember { mutableStateOf(false) }
+    var playbackCompleted by remember { mutableStateOf(false) }
+    val effectiveSpeed = if (isBoosted) baseSpeed * 2f else baseSpeed
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            val mediaItem = MediaItem.fromUri(videoUri)
-            setMediaItem(mediaItem)
+            setMediaItem(MediaItem.fromUri(videoUri))
             if (initialPosition > 0) {
                 seekTo(initialPosition)
             }
@@ -371,9 +467,34 @@ fun VideoPlayer(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val ended = playbackState == Player.STATE_ENDED
+                playbackCompleted = ended
+                onPlaybackCompletedChanged(ended)
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK && playbackCompleted) {
+                    playbackCompleted = false
+                    onPlaybackCompletedChanged(false)
+                }
+            }
+        }
+
+        exoPlayer.addListener(listener)
         onDispose {
-            settingsManager.saveVideoPlaybackPosition(videoUri, exoPlayer.currentPosition)
+            exoPlayer.removeListener(listener)
+            if (playbackCompleted) {
+                settingsManager.clearVideoPlaybackPosition(videoUri)
+            } else {
+                settingsManager.saveVideoPlaybackPosition(videoUri, exoPlayer.currentPosition)
+            }
             exoPlayer.release()
         }
     }
@@ -382,9 +503,7 @@ fun VideoPlayer(
         exoPlayer.playbackParameters = PlaybackParameters(effectiveSpeed)
     }
 
-    Box(
-        modifier = Modifier.fillMaxSize()
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -393,13 +512,15 @@ fun VideoPlayer(
 
                     setOnLongClickListener {
                         isBoosted = true
-                        false // 让 PlayerView 继续处理长按（如需要）
+                        false
                     }
                     setOnTouchListener { _, event ->
-                        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                        if (event.actionMasked == MotionEvent.ACTION_UP ||
+                            event.actionMasked == MotionEvent.ACTION_CANCEL
+                        ) {
                             isBoosted = false
                         }
-                        false // 不拦截点击，交给控件
+                        false
                     }
                 }
             },

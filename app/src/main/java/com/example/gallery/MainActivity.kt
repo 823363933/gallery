@@ -76,6 +76,16 @@ class MainActivity : ComponentActivity() {
         loadDefaultFolderIfExists()
     }
 
+    private val mediaViewerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val mediaDeleted =
+            result.data?.getBooleanExtra(MediaViewerActivity.EXTRA_MEDIA_DELETED, false) == true
+        if (mediaDeleted) {
+            navigationStack.lastOrNull()?.uri?.let { loadMediaFiles(it) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -279,7 +289,7 @@ class MainActivity : ComponentActivity() {
             putStringArrayListExtra("all_image_uris", ArrayList(imageFiles.map { it.uri.toString() }))
             putStringArrayListExtra("all_image_names", ArrayList(imageFiles.map { it.name }))
         }
-        startActivity(intent)
+        mediaViewerLauncher.launch(intent)
     }
 
     private fun startSlideshow() {

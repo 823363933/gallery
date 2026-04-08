@@ -14,15 +14,14 @@ class SettingsManager(context: Context) {
         private const val KEY_DEFAULT_FOLDER_URI = "default_folder_uri"
         private const val KEY_DEFAULT_FOLDER_NAME = "default_folder_name"
         private const val KEY_DEFAULT_SLIDESHOW_SPEED = "default_slideshow_speed"
+        private const val KEY_INSTANT_DELETE_ENABLED = "instant_delete_enabled"
         private const val KEY_VIDEO_POSITION_PREFIX = "video_position_"
 
-        // 默认播放速度（秒）
         const val DEFAULT_SLIDESHOW_SPEED = 3
 
         private const val TAG = "SettingsManager"
     }
 
-    // 保存默认文件夹
     fun saveDefaultFolder(uri: Uri, name: String) {
         try {
             sharedPreferences.edit()
@@ -30,42 +29,30 @@ class SettingsManager(context: Context) {
                 .putString(KEY_DEFAULT_FOLDER_NAME, name)
                 .apply()
 
-            Log.d(TAG, "保存默认文件夹成功: $name -> $uri")
+            Log.d(TAG, "Saved default folder: $name -> $uri")
         } catch (e: Exception) {
-            Log.e(TAG, "保存默认文件夹失败", e)
+            Log.e(TAG, "Failed to save default folder", e)
         }
     }
 
-    // 获取默认文件夹URI
     fun getDefaultFolderUri(): Uri? {
         return try {
-            val uriString = sharedPreferences.getString(KEY_DEFAULT_FOLDER_URI, null)
-            if (uriString != null) {
-                Log.d(TAG, "获取默认文件夹URI: $uriString")
-                Uri.parse(uriString)
-            } else {
-                Log.d(TAG, "没有找到默认文件夹URI")
-                null
-            }
+            sharedPreferences.getString(KEY_DEFAULT_FOLDER_URI, null)?.let(Uri::parse)
         } catch (e: Exception) {
-            Log.e(TAG, "获取默认文件夹URI失败", e)
+            Log.e(TAG, "Failed to read default folder URI", e)
             null
         }
     }
 
-    // 获取默认文件夹名称
     fun getDefaultFolderName(): String? {
         return try {
-            val name = sharedPreferences.getString(KEY_DEFAULT_FOLDER_NAME, null)
-            Log.d(TAG, "获取默认文件夹名称: $name")
-            name
+            sharedPreferences.getString(KEY_DEFAULT_FOLDER_NAME, null)
         } catch (e: Exception) {
-            Log.e(TAG, "获取默认文件夹名称失败", e)
+            Log.e(TAG, "Failed to read default folder name", e)
             null
         }
     }
 
-    // 清除默认文件夹
     fun clearDefaultFolder() {
         try {
             sharedPreferences.edit()
@@ -73,42 +60,55 @@ class SettingsManager(context: Context) {
                 .remove(KEY_DEFAULT_FOLDER_NAME)
                 .apply()
 
-            Log.d(TAG, "清除默认文件夹设置")
+            Log.d(TAG, "Cleared default folder")
         } catch (e: Exception) {
-            Log.e(TAG, "清除默认文件夹设置失败", e)
+            Log.e(TAG, "Failed to clear default folder", e)
         }
     }
 
-    // 保存默认播放速度
     fun saveDefaultSlideshowSpeed(speed: Int) {
         try {
             sharedPreferences.edit()
                 .putInt(KEY_DEFAULT_SLIDESHOW_SPEED, speed)
                 .apply()
 
-            Log.d(TAG, "保存默认播放速度: $speed")
+            Log.d(TAG, "Saved default slideshow speed: $speed")
         } catch (e: Exception) {
-            Log.e(TAG, "保存默认播放速度失败", e)
+            Log.e(TAG, "Failed to save default slideshow speed", e)
         }
     }
 
-    // 获取默认播放速度
     fun getDefaultSlideshowSpeed(): Int {
         return try {
-            val speed = sharedPreferences.getInt(KEY_DEFAULT_SLIDESHOW_SPEED, DEFAULT_SLIDESHOW_SPEED)
-            Log.d(TAG, "获取默认播放速度: $speed")
-            speed
+            sharedPreferences.getInt(KEY_DEFAULT_SLIDESHOW_SPEED, DEFAULT_SLIDESHOW_SPEED)
         } catch (e: Exception) {
-            Log.e(TAG, "获取默认播放速度失败", e)
+            Log.e(TAG, "Failed to read default slideshow speed", e)
             DEFAULT_SLIDESHOW_SPEED
         }
     }
 
-    // 检查是否有默认文件夹
     fun hasDefaultFolder(): Boolean {
-        val hasFolder = getDefaultFolderUri() != null
-        Log.d(TAG, "检查是否有默认文件夹: $hasFolder")
-        return hasFolder
+        return getDefaultFolderUri() != null
+    }
+
+    fun saveInstantDeleteEnabled(enabled: Boolean) {
+        try {
+            sharedPreferences.edit()
+                .putBoolean(KEY_INSTANT_DELETE_ENABLED, enabled)
+                .apply()
+            Log.d(TAG, "Saved instant delete enabled: $enabled")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save instant delete enabled", e)
+        }
+    }
+
+    fun isInstantDeleteEnabled(): Boolean {
+        return try {
+            sharedPreferences.getBoolean(KEY_INSTANT_DELETE_ENABLED, false)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read instant delete enabled", e)
+            false
+        }
     }
 
     fun saveVideoPlaybackPosition(uri: Uri, positionMs: Long) {
@@ -116,20 +116,29 @@ class SettingsManager(context: Context) {
             sharedPreferences.edit()
                 .putLong(KEY_VIDEO_POSITION_PREFIX + uri.toString(), positionMs)
                 .apply()
-            Log.d(TAG, "保存视频进度: $uri -> $positionMs")
+            Log.d(TAG, "Saved video playback position: $uri -> $positionMs")
         } catch (e: Exception) {
-            Log.e(TAG, "保存视频进度失败: $uri", e)
+            Log.e(TAG, "Failed to save video playback position: $uri", e)
         }
     }
 
     fun getVideoPlaybackPosition(uri: Uri): Long {
         return try {
-            val pos = sharedPreferences.getLong(KEY_VIDEO_POSITION_PREFIX + uri.toString(), 0L)
-            Log.d(TAG, "读取视频进度: $uri -> $pos")
-            pos
+            sharedPreferences.getLong(KEY_VIDEO_POSITION_PREFIX + uri.toString(), 0L)
         } catch (e: Exception) {
-            Log.e(TAG, "读取视频进度失败: $uri", e)
+            Log.e(TAG, "Failed to read video playback position: $uri", e)
             0L
+        }
+    }
+
+    fun clearVideoPlaybackPosition(uri: Uri) {
+        try {
+            sharedPreferences.edit()
+                .remove(KEY_VIDEO_POSITION_PREFIX + uri.toString())
+                .apply()
+            Log.d(TAG, "Cleared video playback position: $uri")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear video playback position: $uri", e)
         }
     }
 }
