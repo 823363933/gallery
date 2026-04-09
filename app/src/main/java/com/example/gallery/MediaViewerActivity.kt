@@ -1,6 +1,7 @@
 package com.example.gallery
 
 import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
@@ -36,12 +37,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -92,14 +93,15 @@ class MediaViewerActivity : ComponentActivity() {
         setContent {
             GalleryTheme {
                 if (type == MediaType.IMAGE && allImageUris.isNotEmpty()) {
+                    val imageUris = allImageUris.map { Uri.parse(it) }
                     ImageGalleryViewer(
                         initialIndex = currentIndex,
-                        imageUris = allImageUris.map { Uri.parse(it) },
+                        imageUris = imageUris,
                         imageNames = allImageNames,
                         shouldInstantDelete = settingsManager.isInstantDeleteEnabled(),
-                        onClose = { currentImageUri ->
+                        onClose = { viewedImageUris ->
                             handleMediaClose(
-                                uri = currentImageUri,
+                                uris = viewedImageUris,
                                 shouldDelete = settingsManager.isInstantDeleteEnabled()
                             )
                         }
@@ -113,7 +115,7 @@ class MediaViewerActivity : ComponentActivity() {
                         shouldInstantDelete = settingsManager.isInstantDeleteEnabled(),
                         onClose = { shouldDelete ->
                             handleMediaClose(
-                                uri = mediaUri,
+                                uris = listOf(mediaUri),
                                 shouldDelete = shouldDelete && settingsManager.isInstantDeleteEnabled()
                             )
                         }
@@ -123,19 +125,21 @@ class MediaViewerActivity : ComponentActivity() {
         }
     }
 
-    private fun handleMediaClose(uri: Uri, shouldDelete: Boolean) {
-        var deleted = false
+    private fun handleMediaClose(uris: List<Uri>, shouldDelete: Boolean) {
+        var deletedAny = false
         if (shouldDelete) {
-            deleted = deleteMediaFile(uri)
-            if (deleted) {
-                settingsManager.clearVideoPlaybackPosition(uri)
+            uris.distinct().forEach { uri ->
+                if (deleteMediaFile(uri)) {
+                    deletedAny = true
+                    settingsManager.clearVideoPlaybackPosition(uri)
+                }
             }
         }
 
-        if (deleted) {
+        if (deletedAny) {
             setResult(
                 Activity.RESULT_OK,
-                android.content.Intent().putExtra(EXTRA_MEDIA_DELETED, true)
+                Intent().putExtra(EXTRA_MEDIA_DELETED, true)
             )
         }
         finish()
@@ -161,7 +165,7 @@ fun ImageGalleryViewer(
     imageUris: List<Uri>,
     imageNames: List<String>,
     shouldInstantDelete: Boolean,
-    onClose: (Uri) -> Unit
+    onClose: (List<Uri>) -> Unit
 ) {
     var isControlsVisible by remember { mutableStateOf(true) }
     val pagerState = rememberPagerState(
@@ -169,9 +173,16 @@ fun ImageGalleryViewer(
         pageCount = { imageUris.size }
     )
     val scope = rememberCoroutineScope()
+    val viewedPages = remember { mutableStateListOf<Int>() }
+
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage !in viewedPages) {
+            viewedPages.add(pagerState.currentPage)
+        }
+    }
 
     BackHandler {
-        onClose(imageUris[pagerState.currentPage])
+        onClose(viewedPages.map { imageUris[it] })
     }
 
     LaunchedEffect(isControlsVisible) {
@@ -222,7 +233,7 @@ fun ImageGalleryViewer(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { onClose(imageUris[pagerState.currentPage]) }) {
+                    IconButton(onClick = { onClose(viewedPages.map { imageUris[it] }) }) {
                         Icon(
                             Icons.Default.ArrowBack,
                             contentDescription = "返回",
@@ -318,7 +329,7 @@ fun ImageGalleryViewer(
 
         if (shouldInstantDelete && isControlsVisible) {
             Text(
-                text = "关闭查看器后将删除当前图片",
+                text = "关闭查看器后将删除已浏览的图片",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 modifier = Modifier
@@ -360,21 +371,13 @@ fun MediaViewerScreen(
             .clickable { isControlsVisible = !isControlsVisible }
     ) {
         when (mediaType) {
-            MediaType.IMAGE -> {
-                SimpleImage(imageUri = mediaUri)
-            }
-
-            MediaType.VIDEO -> {
-                VideoPlayer(
-                    videoUri = mediaUri,
-                    settingsManager = settingsManager,
-                    onPlaybackCompletedChanged = { canDeleteOnClose = it }
-                )
-            }
-
-            else -> {
-                Text("不支持的媒体类型", color = Color.White)
-            }
+            MediaType.IMAGE -> SimpleImage(imageUri = mediaUri)
+            MediaType.VIDEO -> VideoPlayer(
+                videoUri = mediaUri,
+                settingsManager = settingsManager,
+                onPlaybackCompletedChanged = { canDeleteOnClose = it }
+            )
+            else -> Text("不支持的媒体类型", color = Color.White)
         }
 
         androidx.compose.animation.AnimatedVisibility(

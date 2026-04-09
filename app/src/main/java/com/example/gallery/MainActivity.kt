@@ -86,6 +86,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val slideshowLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val mediaDeleted =
+            result.data?.getBooleanExtra(SlideshowActivity.EXTRA_MEDIA_DELETED, false) == true
+        if (mediaDeleted) {
+            navigationStack.lastOrNull()?.uri?.let { loadMediaFiles(it) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -299,7 +309,7 @@ class MainActivity : ComponentActivity() {
                 putStringArrayListExtra("image_uris", ArrayList(imageFiles.map { it.uri.toString() }))
                 putExtra("default_speed", settingsManager.getDefaultSlideshowSpeed())
             }
-            startActivity(intent)
+            slideshowLauncher.launch(intent)
         }
     }
 

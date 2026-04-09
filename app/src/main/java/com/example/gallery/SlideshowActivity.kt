@@ -1,21 +1,58 @@
 package com.example.gallery
 
+import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,10 +70,11 @@ import kotlinx.coroutines.delay
 
 class SlideshowActivity : ComponentActivity() {
 
+    private lateinit var settingsManager: SettingsManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 全屏显示
         window.setFlags(
             WindowManager.LayoutParams.FLAG_FULLSCREEN,
             WindowManager.LayoutParams.FLAG_FULLSCREEN
@@ -45,17 +83,49 @@ class SlideshowActivity : ComponentActivity() {
         val imageUriStrings = intent.getStringArrayListExtra("image_uris") ?: arrayListOf()
         val imageUris = imageUriStrings.map { Uri.parse(it) }
         val defaultSpeed = intent.getIntExtra("default_speed", SettingsManager.DEFAULT_SLIDESHOW_SPEED)
+        settingsManager = SettingsManager(this)
 
         setContent {
             GalleryTheme {
                 SlideshowScreen(
                     imageUris = imageUris,
                     defaultSpeed = defaultSpeed,
-                    onClose = { finish() },
-                    onFinished = { finish() }
+                    shouldInstantDelete = settingsManager.isInstantDeleteEnabled(),
+                    onClose = { playedUris ->
+                        handleSlideshowClose(playedUris)
+                    },
+                    onFinished = { playedUris ->
+                        handleSlideshowClose(playedUris)
+                    }
                 )
             }
         }
+    }
+
+    private fun handleSlideshowClose(playedUris: List<Uri>) {
+        var deletedAny = false
+        if (settingsManager.isInstantDeleteEnabled()) {
+            playedUris.distinct().forEach { uri ->
+                try {
+                    if (DocumentsContract.deleteDocument(contentResolver, uri)) {
+                        deletedAny = true
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        if (deletedAny) {
+            setResult(
+                Activity.RESULT_OK,
+                Intent().putExtra(EXTRA_MEDIA_DELETED, true)
+            )
+        }
+        finish()
+    }
+
+    companion object {
+        const val EXTRA_MEDIA_DELETED = "slideshow_media_deleted"
     }
 }
 
@@ -63,8 +133,9 @@ class SlideshowActivity : ComponentActivity() {
 fun SlideshowScreen(
     imageUris: List<Uri>,
     defaultSpeed: Int,
-    onClose: () -> Unit,
-    onFinished: () -> Unit
+    shouldInstantDelete: Boolean,
+    onClose: (List<Uri>) -> Unit,
+    onFinished: (List<Uri>) -> Unit
 ) {
     var currentIndex by remember { mutableIntStateOf(0) }
     var isPlaying by remember { mutableStateOf(true) }
@@ -72,22 +143,30 @@ fun SlideshowScreen(
     var slideDuration by remember { mutableIntStateOf(defaultSpeed) }
     var transitionEffect by remember { mutableStateOf(TransitionEffect.FADE) }
     var showSettings by remember { mutableStateOf(false) }
+    val playedIndices = remember { mutableStateListOf<Int>() }
 
-    // 自动播放逻辑
+    LaunchedEffect(currentIndex, imageUris.size) {
+        if (imageUris.isNotEmpty() && currentIndex !in playedIndices) {
+            playedIndices.add(currentIndex)
+        }
+    }
+
+    BackHandler {
+        onClose(playedIndices.map { imageUris[it] })
+    }
+
     LaunchedEffect(isPlaying, currentIndex, slideDuration) {
         if (isPlaying && imageUris.isNotEmpty()) {
             delay(slideDuration * 1000L)
             val nextIndex = currentIndex + 1
             if (nextIndex >= imageUris.size) {
-                // 播放完成，自动退出
-                onFinished()
+                onFinished(playedIndices.map { imageUris[it] })
             } else {
                 currentIndex = nextIndex
             }
         }
     }
 
-    // 自动隐藏控制栏
     LaunchedEffect(isControlsVisible) {
         if (isControlsVisible) {
             delay(5000)
@@ -108,26 +187,24 @@ fun SlideshowScreen(
             )
         }
 
-        // 顶部控制栏
         androidx.compose.animation.AnimatedVisibility(
             visible = isControlsVisible,
-            enter = slideInVertically { -it },
-            exit = slideOutVertically { -it },
+            enter = androidx.compose.animation.slideInVertically { -it },
+            exit = androidx.compose.animation.slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopStart)
         ) {
             TopControlBar(
                 currentIndex = currentIndex,
                 totalCount = imageUris.size,
-                onClose = onClose,
+                onClose = { onClose(playedIndices.map { imageUris[it] }) },
                 onShowSettings = { showSettings = true }
             )
         }
 
-        // 底部控制栏
         androidx.compose.animation.AnimatedVisibility(
             visible = isControlsVisible,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it },
+            enter = androidx.compose.animation.slideInVertically { it },
+            exit = androidx.compose.animation.slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomStart)
         ) {
             BottomControlBar(
@@ -142,8 +219,7 @@ fun SlideshowScreen(
                     if (imageUris.isNotEmpty()) {
                         val nextIndex = currentIndex + 1
                         if (nextIndex >= imageUris.size) {
-                            // 到达最后一张，询问是否退出
-                            onFinished()
+                            onFinished(playedIndices.map { imageUris[it] })
                         } else {
                             currentIndex = nextIndex
                         }
@@ -152,7 +228,17 @@ fun SlideshowScreen(
             )
         }
 
-        // 设置对话框
+        if (shouldInstantDelete && isControlsVisible) {
+            Text(
+                text = "关闭幻灯片后将删除已播放的图片",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+            )
+        }
+
         if (showSettings) {
             SlideshowSettingsDialog(
                 slideDuration = slideDuration,
@@ -379,13 +465,10 @@ fun SlideshowSettingsDialog(
             )
         },
         text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // 播放速度设置
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Column {
                     Text(
-                        text = "播放间隔: ${slideDuration}秒",
+                        text = "播放间隔: ${slideDuration} 秒",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -398,7 +481,6 @@ fun SlideshowSettingsDialog(
                     )
                 }
 
-                // 切换效果设置
                 Column {
                     Text(
                         text = "切换效果",
